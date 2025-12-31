@@ -1,0 +1,29 @@
+# Byte-compiled / cached files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.cache
+.pytest_cache/
+
+# Environments / local config
+.env
+.venv/
+venv/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+
+# data
+*.csv
+*.pt
+*.zip
+
+# experiment logs
+runs/
+
+
+
+
+
