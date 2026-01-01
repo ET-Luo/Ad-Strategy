@@ -101,10 +101,19 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--log-dir", type=str, default="runs")
-    parser.add_argument("--num-workers", type=int, default=8)
+    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument(
+        "--gpu-id",
+        type=int,
+        default=0,
+        help="CUDA device index to use, e.g. 0 or 3. Ignored if CUDA is not available.",
+    )
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{args.gpu_id}")
+    else:
+        device = torch.device("cpu")
 
     # Dataset internally splits into train/val by users
     train_dataset = TaobaoSequenceDataset(
@@ -119,21 +128,28 @@ def main() -> None:
     )
 
     pin_memory = device.type == "cuda"
+    loader_common_kwargs = {
+        "batch_size": args.batch_size,
+        "num_workers": args.num_workers,
+        "pin_memory": pin_memory,
+    }
+    if args.num_workers > 0:
+        loader_common_kwargs.update(
+            {
+                "prefetch_factor": 4,
+                "persistent_workers": True,
+            }
+        )
+
     train_loader = DataLoader(
         train_dataset,
-        batch_size=args.batch_size,
         shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=pin_memory,
-        persistent_workers=args.num_workers > 0,
+        **loader_common_kwargs,
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=args.batch_size,
         shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=pin_memory,
-        persistent_workers=args.num_workers > 0,
+        **loader_common_kwargs,
     )
 
     num_items = train_dataset.num_items

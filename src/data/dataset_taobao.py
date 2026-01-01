@@ -49,28 +49,36 @@ class TaobaoSequenceDataset(Dataset):
             )
 
         obj = torch.load(data_path)
-        self.user2seq: Dict[int, List[int]] = obj["user2seq"]
+        user2seq: Dict[int, List[int]] = obj["user2seq"]
         self.num_items: int = int(obj["num_items"])
         self.max_seq_len = max_seq_len
         self.mode = mode
         self.neg_ratio = max(1, int(neg_ratio))
 
-        rng = np.random.default_rng(seed)
-
-        # Build list of (user_id, position_index) for all positives
-        all_pairs: List[Tuple[int, int]] = []
-        for user_id, seq in self.user2seq.items():
-            # positions 1..len(seq)-1 can be prediction targets
+        # Offline expansion: build dense arrays of histories and positive targets
+        # so that __getitem__ becomes a simple index lookup + (cheap) neg sampling.
+        histories: List[List[int]] = []
+        targets: List[int] = []
+        for _, seq in user2seq.items():
+            if len(seq) < 2:
+                continue
             for pos in range(1, len(seq)):
-                all_pairs.append((user_id, pos))
+                history = _pad_or_truncate(seq[:pos], self.max_seq_len)
+                histories.append(history)
+                targets.append(seq[pos])
 
-        # Shuffle and split into train/val
-        rng.shuffle(all_pairs)
-        split_idx = int(len(all_pairs) * (1.0 - val_ratio))
+        self.histories = np.asarray(histories, dtype=np.int64)
+        self.targets = np.asarray(targets, dtype=np.int64)
+
+        rng = np.random.default_rng(seed)
+        all_indices = np.arange(len(self.targets))
+        rng.shuffle(all_indices)
+
+        split_idx = int(len(all_indices) * (1.0 - val_ratio))
         if self.mode == "train":
-            self.pairs = all_pairs[:split_idx]
+            self.indices = all_indices[:split_idx]
         elif self.mode == "val":
-            self.pairs = all_pairs[split_idx:]
+            self.indices = all_indices[split_idx:]
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 
@@ -78,7 +86,7 @@ class TaobaoSequenceDataset(Dataset):
 
     def __len__(self) -> int:
         # we generate neg_ratio negatives per positive on the fly
-        return len(self.pairs) * (1 + self.neg_ratio)
+        return len(self.indices) * (1 + self.neg_ratio)
 
     def _sample_negative(self, exclude_item: int) -> int:
         # Sample until we get an item different from exclude_item
@@ -88,17 +96,13 @@ class TaobaoSequenceDataset(Dataset):
                 return item
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        # Map global idx back to (pair_idx, is_negative_idx)
-        pair_idx = idx // (1 + self.neg_ratio)
+        # Map global idx back to (base_pos_idx, is_negative_idx)
+        base_idx = idx // (1 + self.neg_ratio)
         offset = idx % (1 + self.neg_ratio)
 
-        user_id, pos = self.pairs[pair_idx]
-        seq = self.user2seq[user_id]
-
-        history = seq[:pos]
-        history = _pad_or_truncate(history, self.max_seq_len)
-
-        pos_item = seq[pos]
+        sample_idx = int(self.indices[base_idx])
+        history = self.histories[sample_idx]
+        pos_item = int(self.targets[sample_idx])
 
         if offset == 0:
             target_item = pos_item

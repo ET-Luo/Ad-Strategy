@@ -25,7 +25,7 @@ if [[ ! -f "${DATA_PATH}" ]]; then
   exit 1
 fi
 
-MAX_SEQ_LENS=("50" "200")
+MAX_SEQ_LENS=("50" "200" "500")
 MODELS=("lstm" "transformer")
 
 for L in "${MAX_SEQ_LENS[@]}"; do
@@ -37,8 +37,10 @@ for L in "${MAX_SEQ_LENS[@]}"; do
       --model-type "${M}" \
       --max-seq-len "${L}" \
       --batch-size 8192 \
-      --epochs 2 \
-      --log-dir "${LOG_DIR}"
+      --epochs 5 \
+      --num-workers 4 \
+      --gpu-id 0 \
+      --log-dir "runs/${M}_len${L}"
   done
 done
 
