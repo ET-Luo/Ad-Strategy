@@ -1,4 +1,6 @@
 import argparse
+import os
+import time
 from typing import Literal
 
 import torch
@@ -108,7 +110,17 @@ def main() -> None:
         default=0,
         help="CUDA device index to use, e.g. 0 or 3. Ignored if CUDA is not available.",
     )
+    parser.add_argument(
+        "--time-limit",
+        type=int,
+        default=25,
+        help="Time limit in minutes. Script will exit gracefully after this limit.",
+    )
     args = parser.parse_args()
+
+    start_time = time.time()
+    os.makedirs(args.log_dir, exist_ok=True)
+    checkpoint_path = os.path.join(args.log_dir, "checkpoint.pt")
 
     if torch.cuda.is_available():
         device = torch.device(f"cuda:{args.gpu_id}")
@@ -163,7 +175,27 @@ def main() -> None:
     use_amp = device.type == "cuda"
     scaler = GradScaler(enabled=use_amp)
 
-    for epoch in range(1, args.epochs + 1):
+    start_epoch = 1
+    if os.path.exists(checkpoint_path):
+        print(f"Loading checkpoint from {checkpoint_path}...")
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scaler.load_state_dict(checkpoint["scaler_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        print(f"Resuming from epoch {start_epoch}")
+
+    if start_epoch > args.epochs:
+        print(f"Already completed {args.epochs} epochs. Exiting.")
+        return
+
+    for epoch in range(start_epoch, args.epochs + 1):
+        # Check time limit
+        elapsed_min = (time.time() - start_time) / 60
+        if elapsed_min > args.time_limit:
+            print(f"Time limit reached ({elapsed_min:.1f} min > {args.time_limit} min). Saving and exiting.")
+            break
+
         train_loss = train_one_epoch(
             model,
             train_loader,
@@ -184,6 +216,18 @@ def main() -> None:
         writer.add_scalar("loss/train", train_loss, global_step)
         writer.add_scalar("loss/val", val_loss, global_step)
         writer.add_scalar("metrics/auc", val_auc, global_step)
+
+        # Save checkpoint
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scaler_state_dict": scaler.state_dict(),
+            },
+            checkpoint_path,
+        )
+        print(f"Checkpoint saved to {checkpoint_path}")
 
     writer.close()
 

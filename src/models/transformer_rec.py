@@ -53,7 +53,6 @@ class TransformerRecModel(nn.Module):
         positions = torch.arange(seq_len, device=history_seq.device).unsqueeze(0)
 
         h_emb = self.item_embedding(history_seq) + self.pos_embedding(positions)
-        # For now we do not use padding mask; later we can add it when real data is wired.
         enc_out = self.encoder(h_emb)  # [B, L, E]
         user_repr = enc_out[:, -1, :]  # [B, E] use last position
 

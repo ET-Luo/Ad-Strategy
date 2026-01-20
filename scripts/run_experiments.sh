@@ -25,22 +25,45 @@ if [[ ! -f "${DATA_PATH}" ]]; then
   exit 1
 fi
 
-MAX_SEQ_LENS=("50" "200" "500")
-MODELS=("lstm" "transformer")
+MAX_SEQ_LENS=("250")
+# MODELS=("lstm" "transformer")
+MODELS=("lstm")
+EPOCHS=10
+TIME_LIMIT=25  # Minutes
 
 for L in "${MAX_SEQ_LENS[@]}"; do
   for M in "${MODELS[@]}"; do
     LOG_DIR="runs/${M}_len${L}"
-    echo "=== Running model=${M}, max_seq_len=${L}, log_dir=${LOG_DIR} ==="
-    python -m src.training.train \
-      --data-path "${DATA_PATH}" \
-      --model-type "${M}" \
-      --max-seq-len "${L}" \
-      --batch-size 8192 \
-      --epochs 5 \
-      --num-workers 4 \
-      --gpu-id 0 \
-      --log-dir "runs/${M}_len${L}"
+    echo "=== Starting/Resuming experiment: model=${M}, max_seq_len=${L}, log_dir=${LOG_DIR} ==="
+    
+    while :; do
+      python -m src.training.train \
+        --data-path "${DATA_PATH}" \
+        --model-type "${M}" \
+        --max-seq-len "${L}" \
+        --batch-size 8192 \
+        --epochs "${EPOCHS}" \
+        --num-workers 4 \
+        --gpu-id 0 \
+        --log-dir "${LOG_DIR}" \
+        --time-limit "${TIME_LIMIT}"
+      
+      # Check if training is completed
+      CHECKPOINT="${LOG_DIR}/checkpoint.pt"
+      if [[ -f "${CHECKPOINT}" ]]; then
+        # Use a small python snippet to check if the saved epoch matches target epochs
+        CURRENT_EPOCH=$(python -c "import torch; print(torch.load('${CHECKPOINT}', map_location='cpu')['epoch'])")
+        if [[ "${CURRENT_EPOCH}" -ge "${EPOCHS}" ]]; then
+          echo "=== Experiment model=${M}, max_seq_len=${L} COMPLETED at epoch ${CURRENT_EPOCH} ==="
+          break
+        fi
+        echo "=== Experiment model=${M}, max_seq_len=${L} interrupted at epoch ${CURRENT_EPOCH}. Restarting... ==="
+      else
+        echo "=== No checkpoint found. Something went wrong. Restarting... ==="
+      fi
+      
+      sleep 2
+    done
   done
 done
 
